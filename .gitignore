@@ -1,0 +1,17 @@
+# regenerable simulation data / outputs (the notebook recreates these)
+devchar_runs/
+*.parquet
+*.npz
+*.csv
+*.raw
+psf/
+psf_ascii/
+psf_rerun/
+*.scs
+*.out
+
+# python / jupyter cruft
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+.DS_Store
