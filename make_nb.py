@@ -27,6 +27,49 @@ Each step shows a yellow **RUNNING** banner that clears to a green **PASS** (red
 (`SPECTRE_BIN` → the binary named in `RUN_LOG` → `$PATH` → common install dirs) and licensing is
 taken from your environment.""")
 
+md("""## Step 0 — Preflight: Python version + required packages
+Checks your interpreter and the packages this notebook needs. If anything is missing it prints a
+**copy-ready install command** (tailored to your shell) — paste it in your terminal, then Run All.""")
+code('''import sys, importlib, os, json, html
+from IPython.display import display, HTML
+
+MIN_PY = (3, 8)                                   # pandas/pyarrow need >= 3.8
+REQUIRED = ["numpy", "pandas", "matplotlib", "psf_utils", "pyarrow"]
+
+def _pf_copy(cmd):
+    oc = "navigator.clipboard.writeText(" + json.dumps(cmd) + ");this.textContent='copied!'"
+    display(HTML('<div style="margin:4px 0;font-family:monospace;font-size:12px">'
+        '<button onclick="' + oc.replace('"', '&quot;') + '" style="cursor:pointer;border:1px solid '
+        '#888;border-radius:4px;background:#eaeaea;padding:2px 10px;margin-right:8px">copy</button>'
+        '<code style="user-select:all;background:#f5f5f5;border:1px solid #ddd;padding:3px 7px;'
+        'border-radius:3px">$ ' + html.escape(cmd) + '</code></div>'))
+
+_G, _R, _Z = chr(27)+"[1;42;30m", chr(27)+"[1;41;97m", chr(27)+"[0m"
+def _pf(ok, msg): print((_G+" PASS "+_Z if ok else _R+" FAIL "+_Z) + "  " + msg); return ok
+
+pyok = _pf(sys.version_info[:2] >= MIN_PY, "Python %d.%d.%d  (need >= %d.%d)" % (
+           sys.version_info[0], sys.version_info[1], sys.version_info[2], MIN_PY[0], MIN_PY[1]))
+missing = []
+for m in REQUIRED:
+    try: importlib.import_module(m); _pf(True, "package " + m)
+    except Exception: missing.append(m); _pf(False, "package " + m + "  (missing)")
+
+shell = os.path.basename(os.environ.get("SHELL", "") or "")
+if missing:
+    print("\\nMissing package(s) - copy this into your terminal, then Run All again:")
+    _pf_copy(sys.executable + " -m pip install --user " + " ".join(missing))
+    if shell in ("tcsh", "csh"):
+        print("(tcsh/csh detected) to point at a specific Spectre binary, if needed:")
+        _pf_copy("setenv SPECTRE_BIN /full/path/to/spectre")
+    else:
+        print("(%s detected) to point at a specific Spectre binary, if needed:" % (shell or "bash/sh"))
+        _pf_copy("export SPECTRE_BIN=/full/path/to/spectre")
+    display(HTML('<div style="background:#c0392b;color:#fff;font-weight:700;padding:7px 13px;'
+                 'border-radius:5px">Install the package(s) above, then Run All again.</div>'))
+elif pyok:
+    display(HTML('<div style="background:#1e8449;color:#fff;font-weight:700;padding:7px 13px;'
+                 'border-radius:5px">Environment OK &#10003; Python + all packages present.</div>'))''')
+
 md("""## ⓘ USER INPUT — provide an existing Spectre run
 Give the path to a previous run's **log** (`…/psf/spectre.out`) or its **netlist** (`…/input.scs`).
 That's the only edit needed to retarget the notebook.""")
