@@ -46,7 +46,7 @@ from psf_utils import PSF
 from IPython.display import display, HTML, clear_output
 
 # ---------- live status: yellow RUNNING -> cleared -> green PASS ----------
-RUNNING_MIN_S = 0.2                   # keep the yellow banner visible at least this long
+RUNNING_MIN_S = 0.3                   # keep the yellow banner visible at least this long
 _RUN_T0 = [0.0]
 def running(step):
     _RUN_T0[0] = time.time()
@@ -412,11 +412,21 @@ def show_device_help(spectre_err=""):  # actionable info when auto-pick fails or
     print('    DEVICES_OVERRIDE = ["<nmos_model>", "<pmos_model>"]')
     print("    # type, VDD and L are auto-filled; pass tuples to pin fields.")
 finish()
+# Prominent RUN_LOG status: RED by default (not provided) -> GREEN once a valid log is filled in.
+RUN_LOG_OK = bool(RUN_LOG) and os.path.exists(RUN_LOG)
+if RUN_LOG_OK:
+    display(HTML('<div style="background:#1e8449;color:#fff;font-weight:700;padding:7px 13px;'
+                 'border-radius:5px;font-family:monospace">RUN_LOG OK &nbsp;&#10003;&nbsp; '
+                 + RUN_LOG + '</div>'))
+else:
+    display(HTML('<div style="background:#c0392b;color:#fff;font-weight:700;padding:7px 13px;'
+                 'border-radius:5px;font-family:monospace">RUN_LOG NOT SET &nbsp;&#10007;&nbsp; '
+                 'paste your run\\'s spectre.out (or input.scs) path into RUN_LOG at the top, '
+                 'then Cell &#9656; Run All.</div>'))
 SPECTRE_OK = bool(shutil.which(SPECTRE) or os.path.exists(SPECTRE))
 ntypes = {d[1] for d in DEVICES}
 oks = []
-oks.append(check("RUN_LOG set & exists", bool(RUN_LOG) and os.path.exists(RUN_LOG),
-                 RUN_LOG or "set RUN_LOG above"))
+oks.append(check("RUN_LOG set & exists", RUN_LOG_OK, RUN_LOG or "set RUN_LOG above"))
 oks.append(check("spectre found", SPECTRE_OK,
                  SPECTRE if SPECTRE_OK else "not on PATH/install dirs; set SPECTRE_BIN"))
 oks.append(check("license (FYI)", True, LICENSE or "ambient env"))
