@@ -275,7 +275,11 @@ def discover_run(run_ref):
             lm = lmin_for(model)
             Ls = [round(x*1e6, 4) for x in np.linspace(lm, 2*lm, 7)]
             devices.append((model, t, vdd, Ls))
+    lmin_by_model = {m: round(min(v)*1e6, 4) for m, v in        # per-model Lmin in microns
+                     ((k, [x for x in ls if x]) for k, ls in inst.items()) if v}
+    lmin_default = min(lmin_by_model.values()) if lmin_by_model else 0.18
     return dict(netlist=netlist, include_block=include_block, devices=devices,
+                lmin_by_model=lmin_by_model, lmin_default=lmin_default,
                 nmos=nmos, pmos=pmos, vdd=vdd, temp=temp, sizing=sizing,
                 candidates=candidates, n_models=len(models), info="ok")
 
@@ -329,7 +333,10 @@ SPECTRE = find_spectre(RUN_LOG)
 LICENSE = find_license(SPECTRE)
 
 # ---------- sweep settings (edit to taste) ----------
-# To bypass auto-discovery, set DEVICES_OVERRIDE = [(model, "n"/"p", VDD, [L_um,...]), ...]
+# Override auto-discovery by just naming the device(s) — type, VDD, L are auto-filled from the run:
+#     DEVICES_OVERRIDE = ["nmos_slvt", "pmos_slvt"]
+# Want more control? give tuples (any field you omit is auto-filled):
+#     DEVICES_OVERRIDE = [("nmos_slvt", "n"), ("pmos_slvt", "p", 1.0, [0.05, 0.07, 0.1])]
 DEVICES_OVERRIDE = None
 PROCESS = ""                                               # output-file prefix; blank = auto from sim dir
 W_TOTAL, NF, VSB, DVGS, DVDS = 2e-6, 1, 0.0, 0.025, 0.05   # planar: W/finger = W_TOTAL/NF
@@ -340,7 +347,25 @@ running("STEP 1 \\u2014 Setup, tool + device auto-discovery")
 disc = discover_run(RUN_LOG) if (RUN_LOG and os.path.exists(RUN_LOG)) else \\
        dict(netlist=None, include_block="", devices=[])
 INCLUDE_BLOCK = disc.get("include_block", "")
-DEVICES = DEVICES_OVERRIDE if DEVICES_OVERRIDE else disc.get("devices", [])
+def build_devices(spec, disc):
+    """Normalize DEVICES_OVERRIDE: a bare name (or partial tuple) gets type/VDD/L auto-filled."""
+    vdd0 = disc.get("vdd", 1.0); lm0 = disc.get("lmin_default", 0.18)
+    lmins = disc.get("lmin_by_model", {})
+    ctype = {c["name"]: c["type"] for c in disc.get("candidates", [])}
+    out = []
+    for item in spec:
+        if isinstance(item, (tuple, list)) and len(item) >= 4:
+            out.append(tuple(item)); continue              # fully specified -> use as-is
+        name = item if isinstance(item, str) else item[0]
+        typ  = (item[1] if (not isinstance(item, str) and len(item) > 1) else None) or ctype.get(name)
+        if typ in (None, "?"):
+            low = name.lower()
+            typ = "p" if (low[:1] == "p" or "pmos" in low or "pch" in low) else "n"
+        lmin = lmins.get(name, lm0)
+        Ls = [round(x, 4) for x in np.linspace(lmin, 2*lmin, 7)]
+        out.append((name, typ, vdd0, Ls))
+    return out
+DEVICES = build_devices(DEVICES_OVERRIDE, disc) if DEVICES_OVERRIDE else disc.get("devices", [])
 TEMP = disc.get("temp", 27.0)          # characterize at the run's own temperature
 SIZING = disc.get("sizing", {})        # {model: "nfin"|"w"} — FinFET vs planar
 PROC = PROCESS or process_tag(disc.get("netlist"))   # output-file prefix
@@ -379,13 +404,9 @@ if not DEVICES:
             print(f"    {c['name']:24s} type={c['type']}   (used {c['uses']}x)")
     else:
         print("  (no MOSFET instances found - is RUN_LOG pointing at the right run?)")
-    _vg = disc.get("vdd", 1.0)
-    _ls = ", ".join(str(round(x, 4)) for x in np.linspace(0.05, 0.10, 7))
-    print("\\nThen set DEVICES_OVERRIDE at the TOP of this cell and re-run, e.g.:")
-    print("    DEVICES_OVERRIDE = [")
-    print(f'        ("<nmos_model>", "n", {_vg}, [{_ls}]),   # L values in microns')
-    print(f'        ("<pmos_model>", "p", {_vg}, [{_ls}]),')
-    print("    ]")
+    print("\\nThen set DEVICES_OVERRIDE at the TOP of this cell and re-run -- just the names:")
+    print('    DEVICES_OVERRIDE = ["<nmos_model>", "<pmos_model>"]')
+    print("    # type, VDD and L are auto-filled from the run; pass tuples to override those too.")
 
 gate("STEP 1 \\u2014 Setup & discovery", oks)
 for d in DEVICES:

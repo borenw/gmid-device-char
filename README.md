@@ -39,10 +39,16 @@ From `RUN_LOG` (a `spectre.out` log or an `input.scs`), the notebook:
   fallback) before the full sweep.
 
 If auto-discovery can't pick an NMOS/PMOS pair, Step 1 **doesn't just fail** — it prints the
-candidate MOSFET model names found in the netlist (with inferred type and use-count) plus a
-ready-to-edit `DEVICES_OVERRIDE = [(model, type, VDD, [L…]), …]` template, and halts so you can
-paste the right device names in and re-run. (On success it still lists the candidates so you can
-override a wrong pick the same way.)
+candidate MOSFET model names found in the netlist (with inferred type and use-count) and halts so
+you can name the devices and re-run. The override takes **just the names** — type, supply VDD and
+the L sweep are auto-filled from the run:
+
+```python
+DEVICES_OVERRIDE = ["nmos_slvt", "pmos_slvt"]
+```
+
+(Power users can pass tuples to pin any field: `("nmos_slvt", "n", 1.0, [0.05, 0.07, 0.1])`.) On
+success it also lists the candidates so you can override a wrong pick the same way.
 
 Sweep: nested **L (Lmin→2·Lmin, 7 steps) × VDS × VGS**, `W = 2 µm`, `nf = 1`, `VSB = 0`, 27 °C.
 PMOS biases flipped automatically.
