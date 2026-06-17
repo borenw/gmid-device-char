@@ -51,6 +51,11 @@ DEVICES_OVERRIDE = ["nmos_slvt", "pmos_slvt"]
 (Power users can pass tuples to pin any field: `("nmos_slvt", "n", 1.0, [0.05, 0.07, 0.1])`.) On
 success it also lists the candidates so you can override a wrong pick the same way.
 
+The same help appears if **Step 1b** (the validation op) rejects the auto-picked device: it prints
+the actual Spectre error (e.g. "undefined model", "parameter has no value"), the probe netlist/log
+paths, the candidate model list, and the `DEVICES_OVERRIDE` line to edit — so you can fix it in
+place and re-run.
+
 Sweep: nested **L (Lmin→2·Lmin, 7 steps) × VDS × VGS**, `W = 2 µm`, `nf = 1`, `VSB = 0`, 27 °C.
 PMOS biases flipped automatically.
 

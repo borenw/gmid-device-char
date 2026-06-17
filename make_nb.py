@@ -373,6 +373,18 @@ def device_line(model):                # size FinFETs by nfin, planar devices by
     if SIZING.get(model) == "nfin":
         return f"MD ( d g 0 b ) {model} l=pL nfin={NFIN}"
     return f"MD ( d g 0 b ) {model} l=pL w=pW nf=pNF"
+def show_device_help(spectre_err=""):  # actionable info when auto-pick fails or a probe is rejected
+    if spectre_err:
+        print("\\n\\033[1;41;97m  Spectre rejected the device - its error:  \\033[0m")
+        for ln in spectre_err.splitlines()[:8]: print("   " + ln)
+        print(f"   full log: {OUTDIR}/_probe/probe.out   netlist: {OUTDIR}/_probe/probe.scs")
+    c = disc.get("candidates", [])
+    print("\\nMOSFET models this netlist uses (pick one NMOS and one PMOS):")
+    for x in c: print(f"    {x['name']:24s} type={x['type']}   (used {x['uses']}x)")
+    if not c: print("    (none found - is RUN_LOG pointing at the right run?)")
+    print("\\nUncomment + edit DEVICES_OVERRIDE at the TOP of STEP 1, then re-run - names only:")
+    print('    DEVICES_OVERRIDE = ["<nmos_model>", "<pmos_model>"]')
+    print("    # type, VDD and L are auto-filled; pass tuples to pin fields.")
 finish()
 SPECTRE_OK = bool(shutil.which(SPECTRE) or os.path.exists(SPECTRE))
 ntypes = {d[1] for d in DEVICES}
@@ -398,15 +410,7 @@ oks.append(check("process tag / output prefix (FYI)", True, PROC))
 # Fallback for the auto-discovery error: list candidate device names + a fill-in template
 if not DEVICES:
     print("\\n\\033[1;41;97m  AUTO-DISCOVERY could not select an NMOS/PMOS pair.  \\033[0m")
-    if cand:
-        print("MOSFET models used by the netlist (pick one NMOS and one PMOS):")
-        for c in cand:
-            print(f"    {c['name']:24s} type={c['type']}   (used {c['uses']}x)")
-    else:
-        print("  (no MOSFET instances found - is RUN_LOG pointing at the right run?)")
-    print("\\nThen set DEVICES_OVERRIDE at the TOP of this cell and re-run -- just the names:")
-    print('    DEVICES_OVERRIDE = ["<nmos_model>", "<pmos_model>"]')
-    print("    # type, VDD and L are auto-filled from the run; pass tuples to override those too.")
+    show_device_help()
 
 gate("STEP 1 \\u2014 Setup & discovery", oks)
 for d in DEVICES:
@@ -436,13 +440,18 @@ opp dc
                     "+log", "probe.out"], cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log = open(os.path.join(d, "probe.out")).read() if os.path.exists(os.path.join(d, "probe.out")) else ""
     ok = "0 errors" in log
-    return ok, ("0 errors - model valid" if ok else "spectre rejected it (see _probe/probe.out)")
+    err = "" if ok else "\\n".join(l.strip() for l in log.splitlines()
+                                   if any(k in l for k in ("ERROR", "Error", "fatal",
+                                                           "annot", "no value", "not found")))
+    return ok, ("0 errors - model valid" if ok else "spectre rejected it (info below)"), err
 
 running("STEP 1b \\u2014 device validation via Spectre op")
 probe = [(d[0],) + probe_device(*d) for d in DEVICES]
 finish()
-oks = ([check(f"{m}: simulates", ok, msg) for (m, ok, msg) in probe]
-       or [check("at least one device discovered", False, "none")])
+oks = [check(f"{m}: simulates", ok, msg) for (m, ok, msg, err) in probe] or \\
+      [check("at least one device discovered", False, "none")]
+if not all(ok for (_, ok, _, _) in probe):
+    show_device_help(next((e for (_, ok, _, e) in probe if not ok and e), ""))
 gate("STEP 1b \\u2014 device validation", oks)''')
 
 md("## 2. Netlist generator")
