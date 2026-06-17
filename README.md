@@ -30,8 +30,9 @@ From `RUN_LOG` (a `spectre.out` log or an `input.scs`), the notebook:
 - rewrites all `include`/`.include` lines to absolute paths — preserving `simulator lang=spice`
   context so **HSPICE model cards re-resolve correctly** — so models load from any working dir,
 - scans the netlist + included cards for MOSFET models — spectre `model … bsim4 type=n|p`,
-  `(inline) subckt …` wrappers, **and HSPICE `.model … nmos|pmos level=54`** — tags each n/p, and
-  picks the **most-instantiated** NMOS and PMOS,
+  `(inline) subckt …` wrappers, **and HSPICE `.model … nmos|pmos level=54`** — then **picks the
+  most-instantiated NMOS and PMOS the netlist actually uses**, typed from the model card or, failing
+  that, from the **name rule** (starts with `n`/`N` → NMOS, `p`/`P` → PMOS). No prompting required,
 - takes **Lmin** = the smallest instantiated L of each, and **VDD** = the larger of the supply
   source and the run's swept DC bias range (`idvds`/`idvgs` `stop=`/`values=`), and **temperature**
   from the run's `options temp=`,

@@ -195,43 +195,38 @@ def discover_run(run_ref):
                     ("p" if (nm[:1] == "p" or "pmos" in nm or "pch" in nm) else None)
             if t: _register(name, t)
 
-    inst = {}; sizing = {}                                       # instantiated MOS -> [L]; size param
-    for ln in ntxt.splitlines():
-        s = ln.strip()
-        if not s or s.startswith("//") or s.startswith("*") or "(" not in s or ")" not in s: continue
-        rest = s.split(")", 1)[1].split()
-        if rest and rest[0] in models:
-            kv = _kv(" ".join(rest[1:]))
-            inst.setdefault(rest[0], []).append(_si(kv.get("l")) if kv.get("l") else None)
-            if "nfin" in kv: sizing[rest[0]] = "nfin"            # FinFET (BSIM-CMG)
-            elif "w" in kv:  sizing.setdefault(rest[0], "w")
-
-    # candidate device names — every model token used by an M*/m* instance, with inferred type.
-    # Shown to the user when auto-pick fails (or to override a wrong pick) via DEVICES_OVERRIDE.
-    mos_inst = {}
+    # Scan every MOSFET instance (M*/m*): use-count, L, and sizing — independent of whether the
+    # model card could be typed, so we can always pick the device the NETLIST actually uses.
+    mos_inst = {}; mos_L = {}; sizing = {}
     for ln in ntxt.splitlines():
         s = ln.strip()
         if not s or s[0] not in "mM" or "(" not in s or ")" not in s: continue
         rest = s.split(")", 1)[1].split()
-        if rest: mos_inst[rest[0]] = mos_inst.get(rest[0], 0) + 1
-    def _gtype(nm):
+        if not rest: continue
+        m = rest[0]; kv = _kv(" ".join(rest[1:]))
+        mos_inst[m] = mos_inst.get(m, 0) + 1
+        if kv.get("l"): mos_L.setdefault(m, []).append(_si(kv["l"]))
+        if "nfin" in kv: sizing[m] = "nfin"                  # FinFET (BSIM-CMG)
+        elif "w" in kv:  sizing.setdefault(m, "w")
+
+    def dev_type(nm):                                        # card type, else n/p NAME rule
         if nm in models: return models[nm]
         low = nm.lower()
         if low[:1] == "n" or "nmos" in low or "nch" in low: return "n"
         if low[:1] == "p" or "pmos" in low or "pch" in low: return "p"
         return "?"
-    candidates = sorted(({"name": k, "type": _gtype(k), "uses": v} for k, v in mos_inst.items()),
+    candidates = sorted(({"name": k, "type": dev_type(k), "uses": v} for k, v in mos_inst.items()),
                         key=lambda d: -d["uses"])
 
-    def pick(t):
-        used = [k for k in inst if models[k] == t]
-        if used: return max(used, key=lambda k: len(inst[k]))
-        cand = [k for k in models if models[k] == t]
+    def pick(t):                                             # most-used instantiated device of type t...
+        used = [c["name"] for c in candidates if c["type"] == t]
+        if used: return used[0]
+        cand = [k for k in models if models[k] == t]         # ...else any typed model card
         return cand[0] if cand else None
     nmos, pmos = pick("n"), pick("p")
 
     def lmin_for(m):
-        Ls = [x for x in inst.get(m, []) if x]
+        Ls = [x for x in mos_L.get(m, []) if x]
         return min(Ls) if Ls else 0.18e-6
 
     vdd = None                                                   # supply-named net, else max dc
@@ -276,7 +271,7 @@ def discover_run(run_ref):
             Ls = [round(x*1e6, 4) for x in np.linspace(lm, 2*lm, 7)]
             devices.append((model, t, vdd, Ls))
     lmin_by_model = {m: round(min(v)*1e6, 4) for m, v in        # per-model Lmin in microns
-                     ((k, [x for x in ls if x]) for k, ls in inst.items()) if v}
+                     ((k, [x for x in ls if x]) for k, ls in mos_L.items()) if v}
     lmin_default = min(lmin_by_model.values()) if lmin_by_model else 0.18
     return dict(netlist=netlist, include_block=include_block, devices=devices,
                 lmin_by_model=lmin_by_model, lmin_default=lmin_default,
@@ -333,11 +328,16 @@ SPECTRE = find_spectre(RUN_LOG)
 LICENSE = find_license(SPECTRE)
 
 # ---------- sweep settings (edit to taste) ----------
-# Override auto-discovery by just naming the device(s) — type, VDD, L are auto-filled from the run:
+# Devices are auto-picked from the netlist: the most-used NMOS (name starts with n/N) and PMOS
+# (p/P). You normally do NOT need to touch this.
+#
+# TO OVERRIDE: uncomment the next line and put your model name(s). Type (from the n/p name),
+# supply VDD, and the L sweep are auto-filled from the run — names are all you need:
+#
 #     DEVICES_OVERRIDE = ["nmos_slvt", "pmos_slvt"]
-# Want more control? give tuples (any field you omit is auto-filled):
-#     DEVICES_OVERRIDE = [("nmos_slvt", "n"), ("pmos_slvt", "p", 1.0, [0.05, 0.07, 0.1])]
-DEVICES_OVERRIDE = None
+#
+# (To pin fields, pass tuples instead: ("nmos_slvt", "n", 1.0, [0.05, 0.07, 0.1]).)
+DEVICES_OVERRIDE = None        # leave as None to use the auto-pick above
 PROCESS = ""                                               # output-file prefix; blank = auto from sim dir
 W_TOTAL, NF, VSB, DVGS, DVDS = 2e-6, 1, 0.0, 0.025, 0.05   # planar: W/finger = W_TOTAL/NF
 NFIN = 10                                                  # FinFET fin count (BSIM-CMG, nfin-sized)
