@@ -276,7 +276,8 @@ def discover_run(run_ref):
     return dict(netlist=netlist, include_block=include_block, devices=devices,
                 lmin_by_model=lmin_by_model, lmin_default=lmin_default,
                 nmos=nmos, pmos=pmos, vdd=vdd, temp=temp, sizing=sizing,
-                candidates=candidates, n_models=len(models), info="ok")
+                candidates=candidates, all_models=dict(models),
+                n_models=len(models), info="ok")
 
 def process_tag(netlist):
     # short process label from the run's sim directory (strip a leading "spectre_"),
@@ -373,15 +374,26 @@ def device_line(model):                # size FinFETs by nfin, planar devices by
     if SIZING.get(model) == "nfin":
         return f"MD ( d g 0 b ) {model} l=pL nfin={NFIN}"
     return f"MD ( d g 0 b ) {model} l=pL w=pW nf=pNF"
+def model_menu():                      # table of ALL MOSFET models parsed from the model file/PDK
+    am = disc.get("all_models", {})
+    used = {c["name"] for c in disc.get("candidates", [])}
+    picked = {d[0] for d in DEVICES}
+    isbin = lambda nm: "." in nm and nm.rsplit(".", 1)[1].isdigit() and nm.rsplit(".", 1)[0] in am
+    def tag(nm):
+        t = (["netlist"] if nm in used else []) + (["AUTO"] if nm in picked else [])
+        return f" [{'+'.join(t)}]" if t else ""
+    ns = [k for k, v in sorted(am.items()) if v == "n" and not isbin(k)]
+    ps = [k for k, v in sorted(am.items()) if v == "p" and not isbin(k)]
+    print("\\nAvailable MOSFET models (parsed from the model file/PDK):")
+    print("  NMOS:", ", ".join(n + tag(n) for n in ns) or "(none parsed)")
+    print("  PMOS:", ", ".join(p + tag(p) for p in ps) or "(none parsed)")
+    print("  [AUTO]=auto-picked (the netlist's device)  [netlist]=instantiated in the run")
 def show_device_help(spectre_err=""):  # actionable info when auto-pick fails or a probe is rejected
     if spectre_err:
         print("\\n\\033[1;41;97m  Spectre rejected the device - its error:  \\033[0m")
         for ln in spectre_err.splitlines()[:8]: print("   " + ln)
         print(f"   full log: {OUTDIR}/_probe/probe.out   netlist: {OUTDIR}/_probe/probe.scs")
-    c = disc.get("candidates", [])
-    print("\\nMOSFET models this netlist uses (pick one NMOS and one PMOS):")
-    for x in c: print(f"    {x['name']:24s} type={x['type']}   (used {x['uses']}x)")
-    if not c: print("    (none found - is RUN_LOG pointing at the right run?)")
+    model_menu()
     print("\\nUncomment + edit DEVICES_OVERRIDE at the TOP of STEP 1, then re-run - names only:")
     print('    DEVICES_OVERRIDE = ["<nmos_model>", "<pmos_model>"]')
     print("    # type, VDD and L are auto-filled; pass tuples to pin fields.")
@@ -415,9 +427,8 @@ if not DEVICES:
 gate("STEP 1 \\u2014 Setup & discovery", oks)
 for d in DEVICES:
     print(f"   * {d[1].upper()} {d[0]:14s} VDD={d[2]} V  L={d[3][0]}..{d[3][-1]} um (7 steps)")
-if DEVICES and cand:
-    print("   candidates seen (set DEVICES_OVERRIDE to change): "
-          + ", ".join(f"{c['name']}[{c['type']}]" for c in cand))''')
+if DEVICES:
+    model_menu()''')
 
 md("""## 1b. Validate each discovered device with a quick Spectre op (command-line query)
 If file-based discovery is wrong, this catches it: we actually instantiate the model and run a

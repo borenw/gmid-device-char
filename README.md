@@ -39,9 +39,12 @@ From `RUN_LOG` (a `spectre.out` log or an `input.scs`), the notebook:
 - **validates** each chosen device by running a one-point Spectre op (the "command-line query"
   fallback) before the full sweep.
 
-If auto-discovery can't pick an NMOS/PMOS pair, Step 1 **doesn't just fail** — it prints the
-candidate MOSFET model names found in the netlist (with inferred type and use-count) and halts so
-you can name the devices and re-run. The override takes **just the names** — type, supply VDD and
+Step 1 always prints a **menu of all MOSFET models parsed from the PDK/model file** (NMOS and PMOS,
+with the auto-picked and netlist-used ones marked), so you can see every available flavor — e.g.
+`n12 [netlist+AUTO], n12_lvt, n12_hvt, n33, …` — and override to any of them.
+
+If auto-discovery can't pick an NMOS/PMOS pair, Step 1 **doesn't just fail** — it prints that menu
+and halts so you can name the devices and re-run. The override takes **just the names** — type, supply VDD and
 the L sweep are auto-filled from the run:
 
 ```python
