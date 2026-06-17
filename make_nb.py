@@ -117,7 +117,7 @@ def show_latest(globpat, label="latest output"):
     """ls -lt: newest file matching an absolute glob, with full path + timestamp + size."""
     cmd = f"ls -lt --time-style=long-iso {globpat} 2>/dev/null | head -1"
     print(f"$ {cmd}")
-    out = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.rstrip()
+    out = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.rstrip()
     print(out if out else "(no files yet)")
 
 def copy_cmd(cmd, note="verify this step in your own terminal"):
@@ -664,7 +664,7 @@ EX_FILE = glob.glob(os.path.join(OUTDIR, EX_DEV, "raw",
 finish()
 
 def grep_nums(pat, f):
-    out = subprocess.run(f"grep {pat!r} {f}", shell=True, capture_output=True, text=True).stdout
+    out = subprocess.run(f"grep {pat!r} {f}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout
     vals = [float(t) for l in out.splitlines() for t in [l.split()[-1]]
             if t.lstrip("-")[:1].isdigit()]
     return out, np.array(vals)
@@ -842,7 +842,7 @@ csvparq = f"{PROC}_devchar.parquet" if os.path.exists(os.path.join(OUTDIR, f"{PR
 cmd = f"ls -l --time-style=long-iso {OUTDIR}/{csvparq} {OUTDIR}/{PROC}_gmid_lut.npz"
 print(f"\\nOutput data files (process prefix: {PROC}):")
 print(f"$ {cmd}")
-print(subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.rstrip())
+print(subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.rstrip())
 copy_cmd("python3 -c " + repr("import numpy as np; print(sorted(np.load("
          + repr(LUT) + ").files)[:8])"),
          "Step 7 - open the lookup-table .npz and list its arrays")''')
