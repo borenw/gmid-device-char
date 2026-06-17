@@ -19,7 +19,7 @@ analyses** — taking the swept DC bias range as VDD and matching the run temper
 
 | file | what it does |
 |---|---|
-| `device_char.ipynb` | The main deliverable. Auto-discovers the devices from your run, validates them with a quick Spectre op, then runs gm/I_D characterization with per-step PASS/FAIL gates, a `grep`-the-raw-output worked example, and design plots. |
+| `device_char.ipynb` | The main deliverable. Auto-discovers the devices from your run, validates them with a quick Spectre op, then runs gm/I_D characterization with per-step PASS/FAIL gates, a **click-to-copy shell command per step** (re-run the probe/sweep, grep the raw PSF, load the dataset — verify it yourself), a `grep`-the-raw-output worked example, and design plots. |
 | `rerun_spectre_sim.ipynb` | Re-runs a previous Spectre transient sim from its run directory, non-destructively, and summarizes the result. |
 | `make_nb.py` | Generator script that builds `device_char.ipynb` (edit this, then re-run to regenerate the notebook). |
 

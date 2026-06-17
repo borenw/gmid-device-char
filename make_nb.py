@@ -77,6 +77,20 @@ def show_latest(globpat, label="latest output"):
     out = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.rstrip()
     print(out if out else "(no files yet)")
 
+def copy_cmd(cmd, note="verify this step in your own terminal"):
+    """Render a one-line shell command with a click-to-copy button (click the box to select, too)."""
+    import json, html
+    onclick = ("navigator.clipboard.writeText(" + json.dumps(cmd) +
+               ");this.textContent='copied!';setTimeout(()=>this.textContent='copy',1500)")
+    display(HTML(
+        '<div style="margin:6px 0;font-family:monospace;font-size:12px">'
+        '<span style="color:#777">' + html.escape(note) + ':</span><br>'
+        '<button onclick="' + onclick.replace('"', '&quot;') + '" '
+        'style="cursor:pointer;border:1px solid #888;border-radius:4px;background:#eaeaea;'
+        'padding:2px 10px;margin-right:8px">copy</button>'
+        '<code style="user-select:all;background:#f5f5f5;border:1px solid #ddd;'
+        'padding:3px 7px;border-radius:3px">$ ' + html.escape(cmd) + '</code></div>'))
+
 # ---------- AUTO-DISCOVER the run: netlist, absolutized includes, and devices ----------
 # Generalizes across PDKs (no hardcoded model names/supply). Reads the log, then the run
 # directory's netlist + included model cards. Picks the most-instantiated NMOS and PMOS,
@@ -428,7 +442,9 @@ gate("STEP 1 \\u2014 Setup & discovery", oks)
 for d in DEVICES:
     print(f"   * {d[1].upper()} {d[0]:14s} VDD={d[2]} V  L={d[3][0]}..{d[3][-1]} um (7 steps)")
 if DEVICES:
-    model_menu()''')
+    model_menu()
+    copy_cmd(f'grep -nw "{DEVICES[0][0]}" "{disc.get("netlist","")}" | head',
+             "Step 1 - confirm the picked NMOS is instantiated in your netlist")''')
 
 md("""## 1b. Validate each discovered device with a quick Spectre op (command-line query)
 If file-based discovery is wrong, this catches it: we actually instantiate the model and run a
@@ -463,7 +479,10 @@ oks = [check(f"{m}: simulates", ok, msg) for (m, ok, msg, err) in probe] or \\
       [check("at least one device discovered", False, "none")]
 if not all(ok for (_, ok, _, _) in probe):
     show_device_help(next((e for (_, ok, _, e) in probe if not ok and e), ""))
-gate("STEP 1b \\u2014 device validation", oks)''')
+gate("STEP 1b \\u2014 device validation", oks)
+copy_cmd(f'cd "{OUTDIR}/_probe" && "{SPECTRE}" -64 probe.scs -format psfascii -raw ./praw '
+         f'+log probe.out; grep -E "completes with|ERROR" probe.out',
+         "Step 1b - re-run the device validation op yourself")''')
 
 md("## 2. Netlist generator")
 code('''def gen_netlist(model, mtype, vdd, Ls):
@@ -494,7 +513,9 @@ oks.append(check("netlist non-empty", len(_nl) > 500, f"{len(_nl)} chars"))
 oks.append(check("model instantiated", DEVICES[0][0] in _nl))
 oks.append(check("op-point saved", "save MD:oppoint" in _nl))
 oks.append(check("nested L/VDS/VGS sweep", all(k in _nl for k in ("swpL", "swpVDS", "dcVGS"))))
-gate("STEP 2 \\u2014 Netlist generator", oks)''')
+gate("STEP 2 \\u2014 Netlist generator", oks)
+_prev = os.path.join(OUTDIR, "bench_preview.scs"); open(_prev, "w").write(_nl)
+copy_cmd(f'sed -n "1,40p" "{_prev}"', "Step 2 - view the head of the generated bench netlist")''')
 
 md("## 3. Run Spectre for each device  (cached unless geometry/grid changes)")
 code('''FORCE_RESIM = False
@@ -521,7 +542,10 @@ oks = [check(f"{name:9s} rc={rc} files={n}/{exp}",
             rc == 0 and n == exp and ("cached" in s or "0 errors" in s), s)
        for (name, rc, n, s, exp) in res]
 gate("STEP 3 \\u2014 Spectre runs", oks)
-show_latest(f"{OUTDIR}/*/raw/*_dcVGS.dc", "newest sim output")''')
+show_latest(f"{OUTDIR}/*/raw/*_dcVGS.dc", "newest sim output")
+copy_cmd(f'cd "{OUTDIR}/{DEVICES[0][0]}" && "{SPECTRE}" -64 char.scs -format psfascii -raw ./raw '
+         f'+log char.out; grep "completes with" char.out',
+         "Step 3 - re-run one device's full Spectre sweep yourself")''')
 
 md("## 4. Load every operating point into a tidy DataFrame")
 code('''def load_device(model, mtype, vdd, Ls):
@@ -568,6 +592,8 @@ oks.append(check("gm finite & non-zero", np.isfinite(df.gm).any() and (df.gm.abs
 oks.append(check("results saved", os.path.exists(os.path.join(OUTDIR, saved)), saved))
 gate("STEP 4 \\u2014 Load & FOM", oks)
 show_latest(f"{OUTDIR}/{PROC}_devchar.*", "newest dataset")
+copy_cmd(f'ls "{OUTDIR}/{DEVICES[0][0]}/raw/"*_dcVGS.dc | wc -l; ls -l "{OUTDIR}/{saved}"',
+         "Step 4 - count the swept op-point files and the saved dataset")
 df.head()''')
 
 md("""## 4b. Worked example — `grep` the **gm** parameter straight from the raw output
@@ -609,6 +635,8 @@ oks = [check("grep'd gm matches psf_utils-loaded gm", np.isclose(EX_GM, row.gm, 
        check("example maps to a plotted point", np.isfinite(EX_VOV) and np.isfinite(EX_GMID),
              f"Vov={EX_VOV:.3f} V, gm/Id={EX_GMID:.2f} S/A")]
 gate("4b \\u2014 grep gm", oks)
+copy_cmd("grep " + repr('"MD:gm"') + " " + repr(EX_FILE),
+         "Step 4b - grep the gm values straight from the raw PSF yourself")
 
 fig, ax = plt.subplots(figsize=(7, 4))
 ax.semilogy(vgs_v, gm_v, "-o", ms=3, label=f"grep'd gm  ({EX_DEV}, L={EX_L}µm, VDS={EX_VDS}V)")
@@ -642,6 +670,8 @@ oks.append(check("intrinsic gain finite", bool(np.isfinite(matrix.gain).all())))
 gate("STEP 5 \\u2014 Device matrix", oks)
 _size = f"nfin={NFIN}" if "nfin" in SIZING.values() else f"W={W_TOTAL*1e6:g}um"
 print(f"Device matrix @ gm/Id = {GM_ID} S/A, VDS = VDD/2, {_size}:")
+_py5 = "import pandas as pd; print(pd.read_parquet(" + repr(os.path.join(OUTDIR, saved)) + ").shape)"
+copy_cmd("python3 -c " + repr(_py5), "Step 5 - load the saved dataset and print its shape")
 matrix''')
 
 md("## 6. gm/ID design plots")
@@ -674,7 +704,10 @@ finish()
 gate("STEP 6a \\u2014 gm/Id vs Vov",
      [check("data within axis ranges", bool(df.gm_id.between(0,35).any() and df.Vov.between(-0.4,1.0).any())),
       check("grep example star placed", np.isfinite(EX_VOV) and np.isfinite(EX_GMID),
-            f"({EX_VOV:.3f} V, {EX_GMID:.2f} S/A)")])''')
+            f"({EX_VOV:.3f} V, {EX_GMID:.2f} S/A)")])
+copy_cmd("python3 -c " + repr("import pandas as pd; print(pd.read_parquet("
+         + repr(os.path.join(OUTDIR, saved)) + ").gm_id.describe())"),
+         "Step 6a - check the gm/Id distribution behind the plot")''')
 
 md("### 6b. Ft [GHz] vs gm/Id [S/A]  — x 4–20 (grid 2), y 0–70 (grid 10), L sweep, dashed @ gm/Id=15")
 code('''running("STEP 6b \\u2014 Ft vs gm/Id")
@@ -699,7 +732,10 @@ nL = {d[0]: df[df.device == d[0]].L_um.nunique() for d in DEVICES}
 gate("STEP 6b \\u2014 Ft vs gm/Id",
      [check("7 L curves per device", all(v == 7 for v in nL.values()), str(nL)),
       check("Ft data > 0", bool((df.ft_GHz > 0).any())),
-      check("gm/Id range covers the 15 line", bool(df.gm_id.between(4, 20).any()))])''')
+      check("gm/Id range covers the 15 line", bool(df.gm_id.between(4, 20).any()))])
+copy_cmd("python3 -c " + repr("import pandas as pd; print(pd.read_parquet("
+         + repr(os.path.join(OUTDIR, saved)) + ").ft_GHz.describe())"),
+         "Step 6b - check the Ft distribution behind the plot")''')
 
 md("### 6c. (bonus) intrinsic gain & output characteristics")
 code('''running("STEP 6c \\u2014 bonus plots")
@@ -718,7 +754,10 @@ for vg in np.round(np.arange(0.4, g.vdd.iloc[0] + 1e-9, 0.2), 3):
 axes[1].set(xlabel="VDS [V]", ylabel="Id [mA]", title=f"Output char  {dev0}  L={g.L_um.iloc[0]:g}µm")
 axes[1].grid(True, alpha=.3); axes[1].legend(fontsize=8, title="VGS")
 fig.tight_layout(); finish()
-gate("STEP 6c \\u2014 bonus plots", [check("rendered", True)])''')
+gate("STEP 6c \\u2014 bonus plots", [check("rendered", True)])
+copy_cmd("python3 -c " + repr("import pandas as pd; print(pd.read_parquet("
+         + repr(os.path.join(OUTDIR, saved)) + ").gain.describe())"),
+         "Step 6c - check the intrinsic-gain distribution behind the plot")''')
 
 md("## 7. Lookup-table export + deliverables listing")
 code('''def export_lut(df, path):
@@ -750,7 +789,10 @@ csvparq = f"{PROC}_devchar.parquet" if os.path.exists(os.path.join(OUTDIR, f"{PR
 cmd = f"ls -l --time-style=long-iso {OUTDIR}/{csvparq} {OUTDIR}/{PROC}_gmid_lut.npz"
 print(f"\\nOutput data files (process prefix: {PROC}):")
 print(f"$ {cmd}")
-print(subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.rstrip())''')
+print(subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.rstrip())
+copy_cmd("python3 -c " + repr("import numpy as np; print(sorted(np.load("
+         + repr(LUT) + ").files)[:8])"),
+         "Step 7 - open the lookup-table .npz and list its arrays")''')
 
 nb["cells"] = cells
 nb["metadata"] = {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
