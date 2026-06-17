@@ -95,6 +95,10 @@ environment — its `psf/spectre.out` log or its `input.scs` netlist — then **
 else is auto-discovered; the sweep ranges (`W`, `DVGS`, `DVDS`, …) and `DEVICES_OVERRIDE` are plain
 variables in step 1 if you want to retarget geometry or models.
 
+Step 1 shows a **RUN_LOG status banner that is red by default** ("RUN_LOG NOT SET") and turns
+**green** ("RUN_LOG OK ✓ …") only once you've filled in a valid path and it passes the check — so
+an un-configured notebook is unmistakably red. (Each step's yellow RUNNING flash lasts ~0.3 s.)
+
 > Note: `device_char.ipynb` is committed as a **clean template** (no executed outputs) so it stays
 > PDK-neutral. Running it regenerates everything. The large simulation data (`devchar_runs/`,
 > `*.parquet`, `*.npz`) is regenerable and is **git-ignored**.
