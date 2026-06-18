@@ -12,8 +12,9 @@ Self-contained Spectre **gm/ID sweep bench**. It **auto-discovers** the NMOS + P
 their type, minimum L, supply VDD, and PDK include files **from your run** — nothing PDK-specific
 is hardcoded — spectre-syntax model cards, HSPICE `.model … nmos` cards (via `simulator lang=spice`
 / `.include` / `.lib` + `.param` corner knobs), **binned models** (instance uses the base name,
-cards are `<base>.1`/`.2`…), and **FinFETs sized by `nfin`** are all handled — planar BSIM and
-FinFET BSIM-CMG alike, across a range of bulk and FinFET process nodes. It also **capitalizes on
+cards are `<base>.1`/`.2`…), **FinFETs sized by `nfin`**, and **subckt-wrapped devices** (open-PDK
+style — the op-point is read from the internal FET) are all handled — planar BSIM, FinFET BSIM-CMG,
+and SPICE-syntax open PDKs alike, across a wide range of process nodes. It also **capitalizes on
 the run's own analyses** — taking the swept bias range as VDD and matching the run temperature.
 Extracts `gm, gds, cgs, cgd, cgg, vth, vdsat, ft …` over a **geometry × bias** matrix.
 
@@ -252,26 +253,38 @@ def discover_run(run_ref):
                     ("p" if (nm[:1] == "p" or "pmos" in nm or "pch" in nm) else None)
             if t: _register(name, t)
 
-    # Scan every MOSFET instance (M*/m*): use-count, L, and sizing — independent of whether the
-    # model card could be typed, so we can always pick the device the NETLIST actually uses.
-    mos_inst = {}; mos_L = {}; sizing = {}
-    for ln in ntxt.splitlines():
-        s = ln.strip()
-        if not s or s[0] not in "mM" or "(" not in s or ")" not in s: continue
-        rest = s.split(")", 1)[1].split()
-        if not rest: continue
-        m = rest[0]; kv = _kv(" ".join(rest[1:]))
-        mos_inst[m] = mos_inst.get(m, 0) + 1
-        if kv.get("l"): mos_L.setdefault(m, []).append(_si(kv["l"]))
-        if "nfin" in kv: sizing[m] = "nfin"                  # FinFET (BSIM-CMG)
-        elif "w" in kv:  sizing.setdefault(m, "w")
-
     def dev_type(nm):                                        # card type, else n/p NAME rule
         if nm in models: return models[nm]
         low = nm.lower()
-        if low[:1] == "n" or "nmos" in low or "nch" in low: return "n"
-        if low[:1] == "p" or "pmos" in low or "pch" in low: return "p"
+        if "pmos" in low or "pfet" in low or "pch" in low or low[:1] == "p": return "p"
+        if "nmos" in low or "nfet" in low or "nch" in low or low[:1] == "n": return "n"
         return "?"
+
+    # Scan every instance the netlist actually uses, so we pick the right device. Handles both
+    # spectre 'NAME (nodes) MODEL k=v ...' and SPICE 'NAME n n .. MODEL k=v ...' (M* devices AND
+    # X* subckt instances, e.g. open-PDK FET subckts). Keep only MOSFET-looking models.
+    mos_inst = {}; mos_L = {}; sizing = {}
+    for ln in ntxt.splitlines():
+        s = ln.strip()
+        if not s or s[0] not in "mMxX" or s.startswith("//") or s.startswith("*"): continue
+        if "(" in s and ")" in s:                            # spectre: NAME (nodes) MODEL ...
+            rest = s.split(")", 1)[1].split()
+            if not rest: continue
+            model = rest[0]; params = " ".join(rest[1:])
+        else:                                                # spice: NAME nodes... MODEL k=v ...
+            toks = s.split(); mi = None
+            for i in range(1, len(toks)):
+                if "=" in toks[i]: break
+                mi = i                                       # last bare token before first k=v
+            if mi is None: continue
+            model = toks[mi]; params = " ".join(toks[mi + 1:])
+        if dev_type(model) == "?": continue                  # skip R/C/V and non-FET subckts
+        kv = _kv(params)
+        mos_inst[model] = mos_inst.get(model, 0) + 1
+        if kv.get("l"): mos_L.setdefault(model, []).append(_si(kv["l"]))
+        if "nfin" in kv: sizing[model] = "nfin"              # FinFET (BSIM-CMG)
+        elif "w" in kv:  sizing.setdefault(model, "w")
+
     candidates = sorted(({"name": k, "type": dev_type(k), "uses": v} for k, v in mos_inst.items()),
                         key=lambda d: -d["uses"])
 
@@ -286,32 +299,46 @@ def discover_run(run_ref):
         Ls = [x for x in mos_L.get(m, []) if x]
         return min(Ls) if Ls else 0.18e-6
 
-    vdd = None                                                   # supply-named net, else max dc
+    # VDD from voltage sources (prefer a supply-named net) + the bias the run actually swept.
+    # Handles spectre 'NAME (p n) vsource ... dc=V' and SPICE 'NAME p n [dc] V [pulse(lo hi ...)]'.
+    SUP = ("vdd", "vcc", "vdda", "vddio", "vpwr", "vcca", "vddd", "avdd")
+    named, allv, vbias = [], [], []
     for ln in ntxt.splitlines():
-        s = ln.strip()
-        if "vsource" not in s or "(" not in s or ")" not in s: continue
-        nodes = s[s.find("(")+1:s.find(")")].split()
-        v = _si(_kv(s.split(")", 1)[1]).get("dc"))
-        if v is not None and nodes and nodes[0].rstrip("!").lower() in \\
-                ("vdd","vcc","vdda","vddio","vpwr","vcca","vddd","avdd"):
-            vdd = v; break
-    if vdd is None:
-        allv = [_si(_kv(s.split(")", 1)[1]).get("dc")) for s in
-                (x.strip() for x in ntxt.splitlines()) if "vsource" in s and ")" in s]
-        allv = [v for v in allv if v is not None]
-        vdd = max(allv) if allv else 1.2
-    # CAPITALIZE on the run's own analyses: the bias actually swept (DC sweep `stop=` and
-    # idvds `values=[...]`) is the characterization rail -> take its max as VDD.
-    vbias = []
-    for ln in ntxt.splitlines():
-        s = ln.strip().lower()
-        if "param=dc" in s.replace(" ", "") and "stop=" in s.replace(" ", ""):
+        s = ln.strip(); low = s.lower()
+        if "vsource" in low and "(" in s and ")" in s:          # spectre source
+            nodes = s[s.find("(")+1:s.find(")")].split()
+            v = _si(_kv(s.split(")", 1)[1]).get("dc"))
+            if v is not None:
+                allv.append(v)
+                if nodes and nodes[0].rstrip("!").lower() in SUP: named.append(v)
+        elif s[:1] in "vV" and "(" not in s.split("pulse", 1)[0]:   # SPICE source
+            toks = s.split()
+            if len(toks) >= 4:
+                v = None
+                for i, t in enumerate(toks):
+                    if t.lower() == "dc" and i+1 < len(toks): v = _si(toks[i+1]); break
+                if v is None:
+                    for t in toks[3:]:
+                        if "=" not in t and t.lower() not in ("dc", "ac", "pulse"):
+                            v = _si(t)
+                            if v is not None: break
+                if v is not None:
+                    allv.append(v)
+                    if toks[1].rstrip("!").lower() in SUP: named.append(v)
+            if "pulse(" in low:
+                seg = low[low.find("pulse(")+6:]; seg = seg[:seg.find(")")]
+                vbias += [x for x in (_si(t) for t in seg.replace(",", " ").split()) if x is not None]
+        if low.startswith(".dc "):                              # SPICE dc sweep: src start stop step
+            vbias += [x for x in (_si(t) for t in s.split()[2:]) if x is not None]
+        if "param=dc" in low.replace(" ", "") and "stop=" in low.replace(" ", ""):
             v = _si(_kv(ln).get("stop"))
             if v is not None: vbias.append(v)
-        if "values=[" in s:
-            seg = s[s.find("values=[")+8:]; seg = seg[:seg.find("]")]
-            vbias += [v for v in (_si(t) for t in seg.split()) if v is not None]
-    if vbias: vdd = max(vdd, max(vbias))
+        if "values=[" in low:
+            seg = low[low.find("values=[")+8:]; seg = seg[:seg.find("]")]
+            vbias += [x for x in (_si(t) for t in seg.split()) if x is not None]
+    vdd = max(named) if named else (max(allv) if allv else None)
+    pool = ([vdd] if vdd is not None else []) + [b for b in vbias if 0.3 <= b <= 5.5]
+    vdd = max(pool) if pool else 1.2
     vdd = min(max(round(vdd, 3), 0.6), 5.0)
 
     temp = 27.0                                                  # CAPITALIZE: match run temperature
@@ -551,7 +578,7 @@ Vd ( d 0 ) vsource dc={sgn}*VDS
 Vg ( g 0 ) vsource dc={sgn}*VGS
 Vb ( b 0 ) vsource dc={-sgn}*VSB
 charOpts options temp={TEMP} tnom={TEMP}
-save MD:oppoint
+save *:oppoint                       // '*' so subckt-internal FETs (open PDKs) are captured too
 swpL sweep param=pL values=[{Lstr}] {{
   swpVDS sweep param=VDS start=0 stop={vdd} step={DVDS} {{
     dcVGS dc param=VGS start=0 stop={vdd} step={DVGS}
@@ -564,7 +591,7 @@ _nl = gen_netlist(*DEVICES[0]); finish()
 oks = []
 oks.append(check("netlist non-empty", len(_nl) > 500, f"{len(_nl)} chars"))
 oks.append(check("model instantiated", DEVICES[0][0] in _nl))
-oks.append(check("op-point saved", "save MD:oppoint" in _nl))
+oks.append(check("op-point saved", "save *:oppoint" in _nl))
 oks.append(check("nested L/VDS/VGS sweep", all(k in _nl for k in ("swpL", "swpVDS", "dcVGS"))))
 gate("STEP 2 \\u2014 Netlist generator", oks)
 _prev = os.path.join(OUTDIR, "bench_preview.scs"); open(_prev, "w").write(_nl)
@@ -601,18 +628,30 @@ copy_cmd(f'cd "{OUTDIR}/{DEVICES[0][0]}" && "{SPECTRE}" -64 char.scs -format psf
          "Step 3 - re-run one device's full Spectre sweep yourself")''')
 
 md("## 4. Load every operating point into a tidy DataFrame")
-code('''def load_device(model, mtype, vdd, Ls):
+code('''def fet_signals(psf, n):
+    """Group PSF signals by instance and return the MOSFET's {param: array} -- handles plain
+    devices (instance 'MD') and subckt devices (internal FET 'MD.m<...>')."""
+    byinst = {}
+    for s in psf.all_signals():
+        if ":" not in s.name: continue
+        inst, param = s.name.split(":", 1)
+        v = np.real(np.asarray(s.ordinate))
+        if np.ndim(v) == 1 and len(v) == n: byinst.setdefault(inst, {})[param] = v
+    fets = [d for d in byinst.values() if "gm" in d and "ids" in d]
+    if not fets: return None
+    return max(fets, key=lambda d: float(np.nanmax(np.abs(d["gm"]))) if len(d["gm"]) else 0.0)
+
+def load_device(model, mtype, vdd, Ls):
     VDS_axis = np.round(np.arange(0, vdd + 1e-9, DVDS), 6); frames = []
     for f in sorted(glob.glob(os.path.join(OUTDIR, model, "raw", "swpL-*_swpVDS-*_dcVGS.dc"))):
         m = re.search(r"swpL-(\\d+)_swpVDS-(\\d+)", os.path.basename(f))
         iL, iV = int(m.group(1)), int(m.group(2)); psf = PSF(f)
         vgs = np.real(np.asarray(psf.sweeps[0].abscissa))
-        sig = {s.name.split(":", 1)[1]: np.real(np.asarray(s.ordinate))
-               for s in psf.all_signals() if ":" in s.name}
+        sig = fet_signals(psf, len(vgs))
+        if sig is None: continue
         rec = {"device": model, "type": mtype, "vdd": vdd, "L_um": Ls[iL],
                "VDS": VDS_axis[iV], "VGS": vgs}
-        for k, v in sig.items():
-            if np.ndim(v) == 1 and len(v) == len(vgs): rec[k] = v
+        rec.update(sig)
         frames.append(pd.DataFrame(rec))
     return pd.concat(frames, ignore_index=True)
 
@@ -661,6 +700,12 @@ g  = df[df.device == EX_DEV]; Ls = sorted(g.L_um.unique()); EX_L = Ls[0]
 iL, iV = Ls.index(EX_L), int(round(EX_VDS / DVDS))
 EX_FILE = glob.glob(os.path.join(OUTDIR, EX_DEV, "raw",
                     f"swpL-{iL:03d}_swpVDS-{iV:03d}_dcVGS.dc"))[0]
+_ep = PSF(EX_FILE); _ii = {}                          # find the FET signal prefix in this file
+for s in _ep.all_signals():
+    if ":" in s.name:
+        _in, _pa = s.name.split(":", 1); _ii.setdefault(_in, set()).add(_pa)
+EX_INST = next((i for i, ps in _ii.items() if "gm" in ps and "ids" in ps), "MD")
+GMPAT = '"' + EX_INST + ':gm"'                         # 'MD:gm' (plain) or 'MD.m<...>:gm' (subckt)
 finish()
 
 def grep_nums(pat, f):
@@ -670,9 +715,9 @@ def grep_nums(pat, f):
     return out, np.array(vals)
 
 print(f"# file under test:\\n{EX_FILE}\\n")
-gm_out, gm_v   = grep_nums('"MD:gm"', EX_FILE)
-_,      vgs_v  = grep_nums('"VGS"',   EX_FILE)
-print(f"$ grep '\\"MD:gm\\"' <file>      # 1st line = unit, then one gm per VGS step")
+gm_out, gm_v   = grep_nums(GMPAT, EX_FILE)
+_,      vgs_v  = grep_nums('"VGS"', EX_FILE)
+print("$ grep " + repr(GMPAT) + " <file>      # 1st line = unit, then one gm per VGS step")
 print("\\n".join(gm_out.splitlines()[:5]) + "\\n   ... (" + str(len(gm_v)) + " values)\\n")
 
 j = int(round(EX_VGS / DVGS))
@@ -688,7 +733,7 @@ oks = [check("grep'd gm matches psf_utils-loaded gm", np.isclose(EX_GM, row.gm, 
        check("example maps to a plotted point", np.isfinite(EX_VOV) and np.isfinite(EX_GMID),
              f"Vov={EX_VOV:.3f} V, gm/Id={EX_GMID:.2f} S/A")]
 gate("4b \\u2014 grep gm", oks)
-copy_cmd("grep " + repr('"MD:gm"') + " " + repr(EX_FILE),
+copy_cmd("grep " + repr(GMPAT) + " " + repr(EX_FILE),
          "Step 4b - grep the gm values straight from the raw PSF yourself")
 
 fig, ax = plt.subplots(figsize=(7, 4))
