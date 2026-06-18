@@ -12,8 +12,11 @@ notebook with no code changes — only `RUN_LOG` differs. It handles spectre-syn
 `.model … nmos` cards pulled in via `simulator lang=spice` / `.include` / `.lib`** (re-wrapped
 automatically, with `.param` corner knobs carried along), **binned models** (instances use the base
 name, cards are `<base>.1`/`.2`… — both registered), **FinFETs sized by `nfin`** (planar by `w`),
-normalizes op-point name variants across BSIM4 / BSIM-CMG, and **capitalizes on the run's own
-analyses** — taking the swept DC bias range as VDD and matching the run temperature.
+and **subckt-wrapped devices** (open / SPICE-syntax PDKs instantiated as `X…` subckts — the
+op-point is read from the *internal* FET via `save *:oppoint`). It also parses SPICE-style sources
+and `.dc` sweeps for VDD, normalizes op-point name variants across BSIM4 / BSIM-CMG, and
+**capitalizes on the run's own analyses** — taking the swept DC bias range as VDD and matching the
+run temperature.
 
 ## Notebooks
 
