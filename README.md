@@ -1,5 +1,10 @@
 # gmid-device-char
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/borenw/gmid-device-char/HEAD?labpath=lut_viewer.ipynb)
+
+▶ **Try the results viewer live in your browser** (no install) — the Binder badge opens
+`lut_viewer.ipynb` on a tiny synthetic sample dataset and renders the gm/I_D + fT plots.
+
 **PDK-agnostic** MOSFET **gm/I_D device characterization** driven from Python + Cadence
 **Spectre**. It **auto-discovers** the NMOS/PMOS models, their type, minimum L, supply VDD, and
 PDK include files **from any prior Spectre run** — nothing process-specific is hardcoded — then
@@ -24,6 +29,7 @@ run temperature.
 |---|---|
 | `device_char.ipynb` | The main deliverable. Auto-discovers the devices from your run, validates them with a quick Spectre op, then runs gm/I_D characterization with per-step PASS/FAIL gates, a **click-to-copy shell command per step** (re-run the probe/sweep, grep the raw PSF, load the dataset — verify it yourself), a `grep`-the-raw-output worked example, and design plots. |
 | `rerun_spectre_sim.ipynb` | Re-runs a previous Spectre transient sim from its run directory, non-destructively, and summarizes the result. |
+| `lut_viewer.ipynb` | **No-Spectre results viewer** (NumPy + Matplotlib only). Loads a `*_gmid_lut.npz` and draws summary plots, ending with a **gm/I_D (left) + fT (right) vs Id/W** combo plot. Runs on Binder against the bundled `sample_gmid_lut.npz`. |
 | `make_nb.py` | Generator script that builds `device_char.ipynb` (edit this, then re-run to regenerate the notebook). |
 
 ## Auto-discovery

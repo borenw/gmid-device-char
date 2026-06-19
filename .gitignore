@@ -15,3 +15,6 @@ __pycache__/
 .ipynb_checkpoints/
 *.pyc
 .DS_Store
+
+# keep the tiny synthetic sample LUT (for the viewer / Binder)
+!sample_gmid_lut.npz
